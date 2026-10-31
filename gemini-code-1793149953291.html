@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Single-Source BFS — Social Mesh</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --unvisited: #334155;
+      --queued: #3b82f6;
+      --current: #f59e0b;
+      --visited: #0d9488;
+      --target: #10b981;
+      --skipped: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); display: flex; flex-direction: column; align-items: center; padding: 20px; user-select: none; }
+    
+    .container { width: 100%; max-width: 900px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+    
+    /* Top Bar & Legend */
+    .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); background: rgba(15,23,42,0.5); }
+    .title { font-size: 15px; font-weight: 600; letter-spacing: 0.3px; }
+    .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); align-items: center; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .line-sample { width: 18px; height: 2px; background: #64748b; display: inline-block; }
+    .line-sample.dashed { background: repeating-linear-gradient(to right, #64748b 0, #64748b 4px, transparent 4px, transparent 8px); }
+
+    /* Graph Canvas */
+    .canvas-wrap { position: relative; width: 100%; height: 420px; background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%); }
+    svg { width: 100%; height: 100%; display: block; }
+    
+    .edge { stroke: #475569; stroke-width: 2; transition: all 0.25s ease; }
+    .edge.friend { stroke-dasharray: 5, 5; }
+    .edge.active-new { stroke: var(--queued); stroke-width: 3.5; }
+    .edge.active-skip { stroke: var(--skipped); stroke-width: 3; stroke-dasharray: 3, 3; }
+
+    .node-circle { fill: var(--unvisited); stroke: #64748b; stroke-width: 2.5; transition: all 0.25s ease; }
+    .node.queued .node-circle { fill: var(--queued); stroke: #93c5fd; }
+    .node.current .node-circle { fill: var(--current); stroke: #fde68a; stroke-width: 4; filter: drop-shadow(0 0 10px rgba(245,158,11,0.7)); }
+    .node.visited .node-circle { fill: var(--visited); stroke: #5eead4; }
+    .node.found .node-circle { fill: var(--target); stroke: #a7f3d0; stroke-width: 4; filter: drop-shadow(0 0 14px rgba(16,185,129,0.9)); }
+    
+    .node-label { fill: var(--text); font-size: 12px; font-weight: 600; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+    .node-tag { fill: var(--muted); font-size: 10px; font-weight: 700; text-anchor: middle; text-transform: uppercase; letter-spacing: 0.6px; }
+
+    .status-pill { position: absolute; top: 12px; left: 16px; background: rgba(15,23,42,0.85); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; font-size: 12px; color: #cbd5e1; font-family: monospace; }
+
+    /* Data Structures Bar */
+    .ds-bar { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); background: #0f172a; }
+    .ds-box { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; min-height: 74px; }
+    .ds-box:first-child { border-right: 1px solid var(--border); }
+    .ds-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); display: flex; justify-content: space-between; }
+    .items-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-height: 28px; }
+    
+    .badge { padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; animation: popIn 0.2s ease; }
+    .badge.q-item { background: rgba(59,130,246,0.2); border: 1px solid var(--queued); color: #93c5fd; }
+    .badge.v-item { background: rgba(13,148,136,0.2); border: 1px solid var(--visited); color: #5eead4; }
+    .badge.v-skip { background: rgba(239,68,68,0.25); border-color: var(--skipped); color: #fca5a5; }
+
+    @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    /* Controls */
+    .controls { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--panel); }
+    .btn-group { display: flex; gap: 8px; }
+    button { background: #334155; color: var(--text); border: 1px solid #475569; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.15s; }
+    button:hover:not(:disabled) { background: #475569; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.primary { background: var(--queued); border-color: #60a5fa; }
+    button.primary:hover:not(:disabled) { background: #2563eb; }
+    .step-counter { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div class="title">BFS Mesh Traversal (can_reach_single)</div>
+    <div class="legend">
+      <div class="legend-item"><span class="line-sample"></span> Family</div>
+      <div class="legend-item"><span class="line-sample dashed"></span> Friend</div>
+      <div class="legend-item"><span class="dot" style="background:var(--current)"></span> Current</div>
+      <div class="legend-item"><span class="dot" style="background:var(--queued)"></span> In Queue</div>
+      <div class="legend-item"><span class="dot" style="background:var(--visited)"></span> Visited</div>
+      <div class="legend-item"><span class="dot" style="background:var(--skipped)"></span> Cycle Skipped</div>
+    </div>
+  </div>
+
+  <div class="canvas-wrap">
+    <div class="status-pill" id="statusText">Ready: Start = Leo, Target = Zoe</div>
+    <svg viewBox="0 0 900 420" id="meshSvg">
+      <g id="edgesLayer"></g>
+      <g id="nodesLayer"></g>
+    </svg>
+  </div>
+
+  <div class="ds-bar">
+    <div class="ds-box">
+      <div class="ds-label"><span>queue (deque)</span><span>← popleft() | append() →</span></div>
+      <div class="items-row" id="queueRow"></div>
+    </div>
+    <div class="ds-box">
+      <div class="ds-label"><span>visited (Set)</span><span id="visitedCount">0 nodes</span></div>
+      <div class="items-row" id="visitedRow"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="btn-group">
+      <button id="prevBtn" onclick="step(-1)">Prev</button>
+      <button id="nextBtn" class="primary" onclick="step(1)">Next Step</button>
+      <button id="playBtn" onclick="togglePlay()">Auto Play</button>
+      <button onclick="resetSim()">Reset</button>
+    </div>
+    <div class="step-counter" id="stepCounter">Step 0 / 0</div>
+  </div>
+</div>
+
+<script>
+  // 12-Node Social Mesh (4 columns x 3 rows with cross-links & cycles)
+  const nodes = [
+    { id: "Leo",  x: 110, y: 210, tag: "START" },
+    { id: "Mia",  x: 290, y: 95 },
+    { id: "Noah", x: 290, y: 210 },
+    { id: "Ava",  x: 290, y: 325 },
+    { id: "Eli",  x: 480, y: 80 },
+    { id: "Ivy",  x: 480, y: 170 },
+    { id: "Owen", x: 480, y: 260 },
+    { id: "Ruby", x: 480, y: 350 },
+    { id: "Max",  x: 670, y: 115 },
+    { id: "Nora", x: 670, y: 210 },
+    { id: "Sam",  x: 670, y: 310 },
+    { id: "Zoe",  x: 810, y: 210, tag: "TARGET" }
+  ];
+
+  // Edges: 'family' (solid) or 'friend' (dashed)
+  const edges = [
+    ["Leo", "Mia", "family"], ["Leo", "Noah", "friend"], ["Leo", "Ava", "family"],
+    ["Mia", "Noah", "friend"], ["Noah", "Ava", "friend"], // Left mesh cycles
+    ["Mia", "Eli", "family"], ["Mia", "Ivy", "friend"],
+    ["Noah", "Ivy", "family"], ["Noah", "Owen", "friend"],
+    ["Ava", "Owen", "family"], ["Ava", "Ruby", "family"],
+    ["Eli", "Ivy", "friend"], ["Ivy", "Owen", "friend"], ["Owen", "Ruby", "friend"], // Mid vertical mesh
+    ["Eli", "Max", "family"], ["Ivy", "Max", "friend"], ["Ivy", "Nora", "family"],
+    ["Owen", "Nora", "friend"], ["Owen", "Sam", "family"], ["Ruby", "Sam", "friend"],
+    ["Max", "Nora", "friend"], ["Nora", "Sam", "friend"], // Right mesh cycles
+    ["Max", "Zoe", "friend"], ["Nora", "Zoe", "family"], ["Sam", "Zoe", "friend"]
+  ];
+
+  // Build adjacency list (all_relevants)
+  const adj = {};
+  nodes.forEach(n => adj[n.id] = []);
+  edges.forEach(([u, v]) => { adj[u].push(v); adj[v].push(u); });
+
+  // Precompute BFS steps
+  function buildSteps() {
+    const frames = [];
+    const start = "Leo", target = "Zoe";
+    let q = [start];
+    let vis = [start];
+    let done = new Set();
+
+    frames.push({
+      status: `Init: queue = [Leo], visited = {Leo}`,
+      current: null, queue: [...q], visited: [...vis], done: new Set(done),
+      newEdges: [], skipEdges: [], skippedNodes: [], found: null
+    });
+
+    while (q.length > 0) {
+      const curr = q.shift();
+      
+      // Frame: Popleft
+      frames.push({
+        status: `popleft() -> ${curr}`,
+        current: curr, queue: [...q], visited: [...vis], done: new Set(done),
+        newEdges: [], skipEdges: [], skippedNodes: [], found: curr === target ? curr : null
+      });
+
+      if (curr === target) {
+        frames[frames.length - 1].status = `Target found! ${curr} is target_person -> return True`;
+        break;
+      }
+
+      // Frame: Expand all_relevants
+      const newEdges = [];
+      const skipEdges = [];
+      const skippedNodes = [];
+      for (const nb of adj[curr]) {
+        if (!vis.includes(nb)) {
+          vis.push(nb);
+          q.push(nb);
+          newEdges.push([curr, nb]);
+        } else {
+          skipEdges.push([curr, nb]);
+          skippedNodes.push(nb);
+        }
+      }
+      done.add(curr);
+
+      frames.push({
+        status: `Expand ${curr}.all_relevants: +${newEdges.length} queued, ${skipEdges.length} skipped (in visited)`,
+        current: curr, queue: [...q], visited: [...vis], done: new Set(done),
+        newEdges, skipEdges, skippedNodes, found: null
+      });
+    }
+    return frames;
+  }
+
+  const frames = buildSteps();
+  let idx = 0;
+  let timer = null;
+
+  // Render static SVG graph elements
+  const edgesLayer = document.getElementById("edgesLayer");
+  const nodesLayer = document.getElementById("nodesLayer");
+  const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+  edges.forEach(([u, v, type]) => {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", nodeMap[u].x);
+    line.setAttribute("y1", nodeMap[u].y);
+    line.setAttribute("x2", nodeMap[v].x);
+    line.setAttribute("y2", nodeMap[v].y);
+    line.setAttribute("class", `edge ${type}`);
+    line.id = `edge-${u}-${v}`;
+    edgesLayer.appendChild(line);
+  });
+
+  nodes.forEach(n => {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "node");
+    g.id = `node-${n.id}`;
+
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", n.x);
+    c.setAttribute("cy", n.y);
+    c.setAttribute("r", 24);
+    c.setAttribute("class", "node-circle");
+    g.appendChild(c);
+
+    const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    lbl.setAttribute("x", n.x);
+    lbl.setAttribute("y", n.y);
+    lbl.setAttribute("class", "node-label");
+    lbl.textContent = n.id;
+    g.appendChild(lbl);
+
+    if (n.tag) {
+      const tag = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      tag.setAttribute("x", n.x);
+      tag.setAttribute("y", n.y - 34);
+      tag.setAttribute("class", "node-tag");
+      tag.textContent = n.tag;
+      g.appendChild(tag);
+    }
+    nodesLayer.appendChild(g);
+  });
+
+  function getEdgeEl(u, v) {
+    return document.getElementById(`edge-${u}-${v}`) || document.getElementById(`edge-${v}-${u}`);
+  }
+
+  function render() {
+    const f = frames[idx];
+    document.getElementById("statusText").textContent = f.status;
+    document.getElementById("stepCounter").textContent = `Step ${idx} / ${frames.length - 1}`;
+    document.getElementById("prevBtn").disabled = idx === 0;
+    document.getElementById("nextBtn").disabled = idx === frames.length - 1;
+
+    // Reset edges
+    edges.forEach(([u, v, type]) => {
+      const el = getEdgeEl(u, v);
+      el.setAttribute("class", `edge ${type}`);
+    });
+    f.newEdges.forEach(([u, v]) => getEdgeEl(u, v).classList.add("active-new"));
+    f.skipEdges.forEach(([u, v]) => getEdgeEl(u, v).classList.add("active-skip"));
+
+    // Update nodes
+    nodes.forEach(n => {
+      const el = document.getElementById(`node-${n.id}`);
+      el.setAttribute("class", "node");
+      if (f.found === n.id) el.classList.add("found");
+      else if (f.current === n.id) el.classList.add("current");
+      else if (f.queue.includes(n.id)) el.classList.add("queued");
+      else if (f.done.has(n.id)) el.classList.add("visited");
+    });
+
+    // Update Queue Row
+    const qRow = document.getElementById("queueRow");
+    qRow.innerHTML = f.queue.map(id => `<span class="badge q-item">${id}</span>`).join("");
+
+    // Update Visited Row
+    const vRow = document.getElementById("visitedRow");
+    document.getElementById("visitedCount").textContent = `${f.visited.length} / ${nodes.length}`;
+    vRow.innerHTML = f.visited.map(id => {
+      const isSkip = f.skippedNodes.includes(id);
+      return `<span class="badge v-item ${isSkip ? 'v-skip' : ''}">${id}</span>`;
+    }).join("");
+  }
+
+  function step(delta) {
+    idx = Math.max(0, Math.min(frames.length - 1, idx + delta));
+    render();
+    if (idx === frames.length - 1 && timer) togglePlay();
+  }
+
+  function togglePlay() {
+    const btn = document.getElementById("playBtn");
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      btn.textContent = "Auto Play";
+    } else {
+      if (idx === frames.length - 1) idx = 0;
+      btn.textContent = "Pause";
+      timer = setInterval(() => step(1), 900);
+    }
+  }
+
+  function resetSim() {
+    if (timer) togglePlay();
+    idx = 0;
+    render();
+  }
+
+  render();
+</script>
+</body>
+</html>

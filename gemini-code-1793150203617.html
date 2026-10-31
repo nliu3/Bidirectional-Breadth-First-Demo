@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bidirectional BFS — Asymmetric Social Mesh</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --unvisited: #334155;
+      
+      /* Left Frontier (Blue/Cyan) */
+      --l-queued: #3b82f6;
+      --l-visited: #1d4ed8;
+      --l-border: #93c5fd;
+      
+      /* Right Frontier (Purple/Pink) */
+      --r-queued: #a855f7;
+      --r-visited: #6b21a8;
+      --r-border: #d8b4fe;
+
+      --current: #f59e0b;
+      --meet: #10b981;
+      --skipped: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); display: flex; flex-direction: column; align-items: center; padding: 18px; user-select: none; }
+    
+    .container { width: 100%; max-width: 960px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
+    
+    /* Top Bar & Legend */
+    .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); background: rgba(15,23,42,0.6); flex-wrap: wrap; gap: 10px; }
+    .title { font-size: 15px; font-weight: 600; letter-spacing: 0.3px; }
+    .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); align-items: center; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .line-sample { width: 16px; height: 2px; background: #64748b; display: inline-block; }
+    .line-sample.dashed { background: repeating-linear-gradient(to right, #64748b 0, #64748b 4px, transparent 4px, transparent 8px); }
+
+    /* Graph Canvas */
+    .canvas-wrap { position: relative; width: 100%; height: 430px; background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%); }
+    svg { width: 100%; height: 100%; display: block; }
+    
+    .edge { stroke: #475569; stroke-width: 2; transition: all 0.25s ease; }
+    .edge.friend { stroke-dasharray: 5, 5; }
+    .edge.active-left { stroke: var(--l-queued); stroke-width: 3.5; }
+    .edge.active-right { stroke: var(--r-queued); stroke-width: 3.5; }
+    .edge.active-skip { stroke: var(--skipped); stroke-width: 2.5; stroke-dasharray: 3, 3; }
+    .edge.active-meet { stroke: var(--meet); stroke-width: 5; filter: drop-shadow(0 0 8px rgba(16,185,129,0.9)); }
+
+    .node-circle { fill: var(--unvisited); stroke: #64748b; stroke-width: 2.5; transition: all 0.25s ease; }
+    
+    /* Left States */
+    .node.l-queued .node-circle { fill: var(--l-queued); stroke: var(--l-border); }
+    .node.l-visited .node-circle { fill: var(--l-visited); stroke: #60a5fa; opacity: 0.85; }
+    
+    /* Right States */
+    .node.r-queued .node-circle { fill: var(--r-queued); stroke: var(--r-border); }
+    .node.r-visited .node-circle { fill: var(--r-visited); stroke: #c084fc; opacity: 0.85; }
+
+    /* Active & Meet States */
+    .node.current .node-circle { fill: var(--current); stroke: #fde68a; stroke-width: 4; filter: drop-shadow(0 0 10px rgba(245,158,11,0.8)); opacity: 1; }
+    .node.meet .node-circle { fill: var(--meet); stroke: #a7f3d0; stroke-width: 4.5; filter: drop-shadow(0 0 15px rgba(16,185,129,1)); opacity: 1; }
+    
+    .node-label { fill: var(--text); font-size: 12px; font-weight: 600; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+    .node-tag { fill: var(--muted); font-size: 10px; font-weight: 700; text-anchor: middle; text-transform: uppercase; letter-spacing: 0.6px; }
+
+    .hud-top { position: absolute; top: 12px; left: 16px; right: 16px; display: flex; justify-content: space-between; pointer-events: none; gap: 10px; flex-wrap: wrap; }
+    .status-pill { background: rgba(15,23,42,0.88); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; font-size: 12px; color: #e2e8f0; font-family: monospace; }
+    .decision-pill { background: rgba(15,23,42,0.88); border: 1px solid #475569; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; color: #f8fafc; }
+    .decision-pill.left-turn { border-color: var(--l-queued); color: var(--l-border); }
+    .decision-pill.right-turn { border-color: var(--r-queued); color: var(--r-border); }
+    .decision-pill.meet-turn { border-color: var(--meet); color: #6ee7b7; }
+
+    /* Dual Data Structures Panel */
+    .ds-grid { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); background: #0f172a; }
+    .side-col { display: flex; flex-direction: column; }
+    .side-col:first-child { border-right: 1px solid var(--border); }
+    
+    .side-header { padding: 8px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; border-bottom: 1px solid rgba(51,65,85,0.6); display: flex; justify-content: space-between; }
+    .side-header.left { background: rgba(59,130,246,0.1); color: var(--l-border); }
+    .side-header.right { background: rgba(168,85,247,0.1); color: var(--r-border); }
+
+    .ds-box { padding: 10px 16px; display: flex; flex-direction: column; gap: 6px; min-height: 62px; border-bottom: 1px solid rgba(51,65,85,0.4); }
+    .ds-box:last-child { border-bottom: none; }
+    .ds-label { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; font-family: monospace; }
+    .items-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-height: 24px; }
+    
+    .badge { padding: 3px 9px; border-radius: 5px; font-size: 12px; font-weight: 600; animation: popIn 0.2s ease; }
+    .badge.lq { background: rgba(59,130,246,0.2); border: 1px solid var(--l-queued); color: var(--l-border); }
+    .badge.lv { background: rgba(29,78,216,0.25); border: 1px solid #3b82f6; color: #bfdbfe; }
+    .badge.rq { background: rgba(168,85,247,0.2); border: 1px solid var(--r-queued); color: var(--r-border); }
+    .badge.rv { background: rgba(107,33,168,0.25); border: 1px solid #a855f7; color: #e9d5ff; }
+    .badge.skip { background: rgba(239,68,68,0.25); border-color: var(--skipped); color: #fca5a5; }
+    .badge.meet { background: rgba(16,185,129,0.3); border: 1.5px solid var(--meet); color: #a7f3d0; }
+
+    @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    /* Controls */
+    .controls { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--panel); }
+    .btn-group { display: flex; gap: 8px; }
+    button { background: #334155; color: var(--text); border: 1px solid #475569; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.15s; }
+    button:hover:not(:disabled) { background: #475569; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.primary { background: var(--l-queued); border-color: #60a5fa; }
+    button.primary:hover:not(:disabled) { background: #2563eb; }
+    .step-counter { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div class="title">Bidirectional BFS (can_reach) — Asymmetric Social Mesh</div>
+    <div class="legend">
+      <div class="legend-item"><span class="line-sample"></span> Family</div>
+      <div class="legend-item"><span class="line-sample dashed"></span> Friend</div>
+      <div class="legend-item"><span class="dot" style="background:var(--l-queued)"></span> Left Queue</div>
+      <div class="legend-item"><span class="dot" style="background:var(--r-queued)"></span> Right Queue</div>
+      <div class="legend-item"><span class="dot" style="background:var(--current)"></span> Expanding</div>
+      <div class="legend-item"><span class="dot" style="background:var(--meet)"></span> Meet!</div>
+    </div>
+  </div>
+
+  <div class="canvas-wrap">
+    <div class="hud-top">
+      <div class="status-pill" id="statusText">Ready</div>
+      <div class="decision-pill" id="decisionText">Frontier Size Check</div>
+    </div>
+    <svg viewBox="0 0 960 430" id="meshSvg">
+      <g id="edgesLayer"></g>
+      <g id="nodesLayer"></g>
+    </svg>
+  </div>
+
+  <div class="ds-grid">
+    <!-- Left Frontier Panel -->
+    <div class="side-col">
+      <div class="side-header left">
+        <span>Left Search (Dense Hub)</span>
+        <span id="lQueueLen">len(left_queue) = 1</span>
+      </div>
+      <div class="ds-box">
+        <div class="ds-label"><span>left_queue (deque)</span><span>← popleft() | append() →</span></div>
+        <div class="items-row" id="lQueueRow"></div>
+      </div>
+      <div class="ds-box">
+        <div class="ds-label"><span>left_visited (Set)</span><span id="lVisCount">1 node</span></div>
+        <div class="items-row" id="lVisRow"></div>
+      </div>
+    </div>
+
+    <!-- Right Frontier Panel -->
+    <div class="side-col">
+      <div class="side-header right">
+        <span>Right Search (Sparse Path)</span>
+        <span id="rQueueLen">len(right_queue) = 1</span>
+      </div>
+      <div class="ds-box">
+        <div class="ds-label"><span>right_queue (deque)</span><span>← popleft() | append() →</span></div>
+        <div class="items-row" id="rQueueRow"></div>
+      </div>
+      <div class="ds-box">
+        <div class="ds-label"><span>right_visited (Set)</span><span id="rVisCount">1 node</span></div>
+        <div class="items-row" id="rVisRow"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="btn-group">
+      <button id="prevBtn" onclick="step(-1)">Prev</button>
+      <button id="nextBtn" class="primary" onclick="step(1)">Next Step</button>
+      <button id="playBtn" onclick="togglePlay()">Auto Play</button>
+      <button onclick="resetSim()">Reset</button>
+    </div>
+    <div class="step-counter" id="stepCounter">Step 0 / 0</div>
+  </div>
+</div>
+
+<script>
+  // Asymmetric 14-Node Mesh:
+  // Left side (Leo) is a dense 5-neighbor star + mesh cycles.
+  // Right side (Zoe) is a sparse corridor that branches only slightly.
+  const nodes = [
+    // Left Dense Hub
+    { id: "Leo",  x: 90,  y: 220, tag: "LEFT (SELF)" },
+    { id: "Mia",  x: 250, y: 65 },
+    { id: "Noah", x: 250, y: 142 },
+    { id: "Ava",  x: 250, y: 220 },
+    { id: "Eli",  x: 250, y: 298 },
+    { id: "Ivy",  x: 250, y: 375 },
+    // Left-Mid Second Wave (Dense)
+    { id: "Owen", x: 430, y: 75 },
+    { id: "Ruby", x: 430, y: 155 },
+    { id: "Max",  x: 430, y: 285 },
+    { id: "Nora", x: 430, y: 365 },
+    // Bridge / Meeting Zone
+    { id: "Sam",  x: 565, y: 220, tag: "BRIDGE" },
+    // Right Sparse Side
+    { id: "Jack", x: 700, y: 155 },
+    { id: "Luna", x: 700, y: 285 },
+    { id: "Zoe",  x: 865, y: 220, tag: "RIGHT (TARGET)" }
+  ];
+
+  const edges = [
+    // Leo's 5 direct connections (High branching factor on Left!)
+    ["Leo", "Mia", "family"], ["Leo", "Noah", "friend"], ["Leo", "Ava", "family"],
+    ["Leo", "Eli", "friend"], ["Leo", "Ivy", "family"],
+    // Left internal cycles
+    ["Mia", "Noah", "friend"], ["Noah", "Ava", "friend"],
+    ["Ava", "Eli", "friend"], ["Eli", "Ivy", "friend"],
+    // Left layer 1 -> Left layer 2 (Even more branching on Left)
+    ["Mia", "Owen", "family"], ["Noah", "Ruby", "family"],
+    ["Eli", "Max", "family"],  ["Ivy", "Nora", "family"],
+    ["Owen", "Ruby", "friend"], ["Max", "Nora", "friend"],
+    // Connection to the central bridge (Sam)
+    ["Ava", "Sam", "friend"], ["Ruby", "Sam", "friend"], ["Max", "Sam", "friend"],
+    // Right Sparse Connections (Zoe only connects to Jack & Luna)
+    ["Zoe", "Jack", "family"], ["Zoe", "Luna", "friend"],
+    ["Jack", "Luna", "friend"],
+    ["Jack", "Sam", "family"], ["Luna", "Sam", "friend"]
+  ];
+
+  const adj = {};
+  nodes.forEach(n => adj[n.id] = []);
+  edges.forEach(([u, v]) => { adj[u].push(v); adj[v].push(u); });
+
+  // Exact simulation of your Python can_reach() method
+  function buildBidirectionalSteps() {
+    const frames = [];
+    const leftStart = "Leo", rightStart = "Zoe";
+    let lQueue = [leftStart], rQueue = [rightStart];
+    let lVis = [leftStart], rVis = [rightStart];
+    let lDone = new Set(), rDone = new Set();
+    let expandLeftOnTie = true;
+
+    frames.push({
+      status: "Init: left_queue=[Leo], right_queue=[Zoe]",
+      decision: "Both queues size 1 (Tie -> Left goes first)",
+      turn: "init",
+      current: null,
+      lQueue: [...lQueue], rQueue: [...rQueue],
+      lVis: [...lVis], rVis: [...rVis],
+      lDone: new Set(lDone), rDone: new Set(rDone),
+      newEdges: [], skipEdges: [], skippedNodes: [],
+      meetNode: null, meetEdge: null
+    });
+
+    while (lQueue.length > 0 && rQueue.length > 0) {
+      let expandLeft;
+      let reason = "";
+      if (lQueue.length < rQueue.length) {
+        expandLeft = true;
+        reason = `len(left)=${lQueue.length} < len(right)=${rQueue.length} → Expand LEFT`;
+      } else if (rQueue.length < lQueue.length) {
+        expandLeft = false;
+        reason = `len(right)=${rQueue.length} < len(left)=${lQueue.length} → Expand RIGHT (Smaller Frontier!)`;
+      } else {
+        expandLeft = expandLeftOnTie;
+        expandLeftOnTie = !expandLeftOnTie;
+        reason = `Tie (${lQueue.length} == ${rQueue.length}) → Expand ${expandLeft ? "LEFT" : "RIGHT"}`;
+      }
+
+      const side = expandLeft ? "left" : "right";
+      const layerCount = expandLeft ? lQueue.length : rQueue.length;
+
+      // Frame: Layer selection decision
+      frames.push({
+        status: `Select ${side.toUpperCase()} BFS layer (${layerCount} node${layerCount > 1 ? 's' : ''} in queue)`,
+        decision: reason,
+        turn: side,
+        current: null,
+        lQueue: [...lQueue], rQueue: [...rQueue],
+        lVis: [...lVis], rVis: [...rVis],
+        lDone: new Set(lDone), rDone: new Set(rDone),
+        newEdges: [], skipEdges: [], skippedNodes: [],
+        meetNode: null, meetEdge: null
+      });
+
+      // Expand one full BFS layer (`for _ in range(len(current_queue)):`)
+      for (let i = 0; i < layerCount; i++) {
+        const curr = expandLeft ? lQueue.shift() : rQueue.shift();
+        const currVis = expandLeft ? lVis : rVis;
+        const currQ = expandLeft ? lQueue : rQueue;
+        const otherVis = expandLeft ? rVis : lVis;
+        const currDone = expandLeft ? lDone : rDone;
+
+        const newEdges = [];
+        const skipEdges = [];
+        const skippedNodes = [];
+        let hitNode = null;
+        let hitEdge = null;
+
+        for (const rel of adj[curr]) {
+          if (otherVis.includes(rel)) {
+            hitNode = rel;
+            hitEdge = [curr, rel];
+            break;
+          }
+          if (!currVis.includes(rel)) {
+            currVis.push(rel);
+            currQ.push(rel);
+            newEdges.push([curr, rel]);
+          } else {
+            skipEdges.push([curr, rel]);
+            skippedNodes.push(rel);
+          }
+        }
+
+        if (hitNode) {
+          frames.push({
+            status: `COLLISION! ${curr} found '${hitNode}' in other_side_visited → return True!`,
+            decision: `Search Met at ${hitNode}! Saved expanding the giant Left wave!`,
+            turn: "meet",
+            current: curr,
+            lQueue: [...lQueue], rQueue: [...rQueue],
+            lVis: [...lVis], rVis: [...rVis],
+            lDone: new Set(lDone), rDone: new Set(rDone),
+            newEdges, skipEdges, skippedNodes,
+            meetNode: hitNode, meetEdge: hitEdge
+          });
+          return frames;
+        }
+
+        currDone.add(curr);
+        frames.push({
+          status: `${side}_queue.popleft() → ${curr}: +${newEdges.length} queued, ${skipEdges.length} skipped`,
+          decision: reason,
+          turn: side,
+          current: curr,
+          lQueue: [...lQueue], rQueue: [...rQueue],
+          lVis: [...lVis], rVis: [...rVis],
+          lDone: new Set(lDone), rDone: new Set(rDone),
+          newEdges, skipEdges, skippedNodes,
+          meetNode: null, meetEdge: null
+        });
+      }
+    }
+    return frames;
+  }
+
+  const frames = buildBidirectionalSteps();
+  let idx = 0;
+  let timer = null;
+
+  const edgesLayer = document.getElementById("edgesLayer");
+  const nodesLayer = document.getElementById("nodesLayer");
+  const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+  edges.forEach(([u, v, type]) => {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", nodeMap[u].x);
+    line.setAttribute("y1", nodeMap[u].y);
+    line.setAttribute("x2", nodeMap[v].x);
+    line.setAttribute("y2", nodeMap[v].y);
+    line.setAttribute("class", `edge ${type}`);
+    line.id = `edge-${u}-${v}`;
+    edgesLayer.appendChild(line);
+  });
+
+  nodes.forEach(n => {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "node");
+    g.id = `node-${n.id}`;
+
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", n.x);
+    c.setAttribute("cy", n.y);
+    c.setAttribute("r", 23);
+    c.setAttribute("class", "node-circle");
+    g.appendChild(c);
+
+    const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    lbl.setAttribute("x", n.x);
+    lbl.setAttribute("y", n.y);
+    lbl.setAttribute("class", "node-label");
+    lbl.textContent = n.id;
+    g.appendChild(lbl);
+
+    if (n.tag) {
+      const tag = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      tag.setAttribute("x", n.x);
+      tag.setAttribute("y", n.y - 32);
+      tag.setAttribute("class", "node-tag");
+      tag.textContent = n.tag;
+      g.appendChild(tag);
+    }
+    nodesLayer.appendChild(g);
+  });
+
+  function getEdgeEl(u, v) {
+    return document.getElementById(`edge-${u}-${v}`) || document.getElementById(`edge-${v}-${u}`);
+  }
+
+  function render() {
+    const f = frames[idx];
+    document.getElementById("statusText").textContent = f.status;
+    
+    const decEl = document.getElementById("decisionText");
+    decEl.textContent = f.decision;
+    decEl.className = "decision-pill " + (f.turn === "left" ? "left-turn" : f.turn === "right" ? "right-turn" : f.turn === "meet" ? "meet-turn" : "");
+
+    document.getElementById("stepCounter").textContent = `Step ${idx} / ${frames.length - 1}`;
+    document.getElementById("prevBtn").disabled = idx === 0;
+    document.getElementById("nextBtn").disabled = idx === frames.length - 1;
+
+    // Reset edges
+    edges.forEach(([u, v, type]) => {
+      getEdgeEl(u, v).setAttribute("class", `edge ${type}`);
+    });
+    const activeEdgeClass = f.turn === "left" ? "active-left" : "active-right";
+    f.newEdges.forEach(([u, v]) => getEdgeEl(u, v).classList.add(activeEdgeClass));
+    f.skipEdges.forEach(([u, v]) => getEdgeEl(u, v).classList.add("active-skip"));
+    if (f.meetEdge) getEdgeEl(f.meetEdge[0], f.meetEdge[1]).classList.add("active-meet");
+
+    // Update Nodes
+    nodes.forEach(n => {
+      const el = document.getElementById(`node-${n.id}`);
+      el.setAttribute("class", "node");
+      if (f.meetNode === n.id) el.classList.add("meet");
+      else if (f.current === n.id) el.classList.add("current");
+      else if (f.lQueue.includes(n.id)) el.classList.add("l-queued");
+      else if (f.rQueue.includes(n.id)) el.classList.add("r-queued");
+      else if (f.lDone.has(n.id)) el.classList.add("l-visited");
+      else if (f.rDone.has(n.id)) el.classList.add("r-visited");
+    });
+
+    // Update Left & Right Queues and Visited Sets
+    document.getElementById("lQueueLen").textContent = `len(left_queue) = ${f.lQueue.length}`;
+    document.getElementById("rQueueLen").textContent = `len(right_queue) = ${f.rQueue.length}`;
+
+    document.getElementById("lQueueRow").innerHTML = f.lQueue.map(id =>
+      `<span class="badge lq ${f.meetNode === id ? 'meet' : ''}">${id}</span>`
+    ).join("");
+    document.getElementById("rQueueRow").innerHTML = f.rQueue.map(id =>
+      `<span class="badge rq ${f.meetNode === id ? 'meet' : ''}">${id}</span>`
+    ).join("");
+
+    document.getElementById("lVisCount").textContent = `${f.lVis.length} nodes`;
+    document.getElementById("lVisRow").innerHTML = f.lVis.map(id => {
+      const cls = f.meetNode === id ? "meet" : f.skippedNodes.includes(id) ? "skip" : "";
+      return `<span class="badge lv ${cls}">${id}</span>`;
+    }).join("");
+
+    document.getElementById("rVisCount").textContent = `${f.rVis.length} nodes`;
+    document.getElementById("rVisRow").innerHTML = f.rVis.map(id => {
+      const cls = f.meetNode === id ? "meet" : f.skippedNodes.includes(id) ? "skip" : "";
+      return `<span class="badge rv ${cls}">${id}</span>`;
+    }).join("");
+  }
+
+  function step(delta) {
+    idx = Math.max(0, Math.min(frames.length - 1, idx + delta));
+    render();
+    if (idx === frames.length - 1 && timer) togglePlay();
+  }
+
+  function togglePlay() {
+    const btn = document.getElementById("playBtn");
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      btn.textContent = "Auto Play";
+    } else {
+      if (idx === frames.length - 1) idx = 0;
+      btn.textContent = "Pause";
+      timer = setInterval(() => step(1), 1000);
+    }
+  }
+
+  function resetSim() {
+    if (timer) togglePlay();
+    idx = 0;
+    render();
+  }
+
+  render();
+</script>
+</body>
+</html>
